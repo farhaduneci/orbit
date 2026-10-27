@@ -1,6 +1,6 @@
 {
   "name": "Your Name",
-  "title": "{name}'s Mindset",
+  "title": "{name}'s Orbit",
   "subtitle": "Who and what shaped how I think about your topic",
   "photo": "photos/me.svg",
   "chip": {
@@ -125,6 +125,6 @@
   ],
   "repo": {
     "label": "GitHub",
-    "href": "https://github.com/farhaduneci/mindset-orbit"
+    "href": "https://github.com/farhaduneci/orbit"
   }
 }

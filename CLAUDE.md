@@ -1,4 +1,4 @@
-# Mindset Orbit
+# Orbit
 
 No-build static page: `index.html`, `style.css`, `orbit.js`. Content lives in JSON, never in code.
 
