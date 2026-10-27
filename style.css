@@ -33,7 +33,11 @@ h1 { font-size: 32px; font-weight: 600; letter-spacing: -.9px; line-height: 1.1;
 #chip { left: 56px; }
 #repo { right: 56px; top: 48px; bottom: auto; }
 #sources { right: 56px; }
-@media (hover: hover) and (pointer: fine) { .pill:hover { color: var(--blue); background: var(--blue-tint); border-color: transparent; } }
+#repo { color: var(--surface); background: var(--ink); border-color: transparent; }
+@media (hover: hover) and (pointer: fine) {
+  .pill:hover { color: var(--blue); background: var(--blue-tint); border-color: transparent; }
+  #repo:hover { color: var(--surface); background: var(--blue); }
+}
 .pill:focus-visible, .node a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 
 /* Node = JS-positioned point; .shift moves it out of the way when a neighbour is zoomed. */

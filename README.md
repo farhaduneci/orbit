@@ -35,7 +35,7 @@ Open http://localhost:5183. The page loads `data/` first and falls back to `temp
 | `subtitle` | Line under the title. |
 | `photo` | Center photo, relative to the JSON file. |
 | `chip` | Optional pill at bottom left: `{ "label": "@handle", "href": "https://x.com/handle" }`. Omit to hide. |
-| `repo` | Optional pill at top right: `{ "label": "GitHub", "href": "..." }`. Omit to hide. |
+| `repo` | Optional call-to-action pill at top right: `{ "label": "Make your own Orbit", "href": "..." }`. Omit to hide. |
 | `sourcesLink` | Optional pill at bottom right: `{ "label": "...", "href": "notes.md" }`, relative to the data folder. Use `null` to hide. |
 | `ellipseRatio` | Orbit width divided by height. `1` gives circles. |
 | `rotation.enabled` | Turn the slow rotation on or off. |
