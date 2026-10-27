@@ -113,7 +113,7 @@ async function main() {
 
   const ratio = data.ellipseRatio;
   // Orbit radii along x and y; the long axis follows the stage's long side and stretches with a taller portrait stage.
-  const radii = r => view.portrait ? [r.radiusY, r.radiusY * ratio * view.h / LONG * 1.15] : [r.radiusY * ratio, r.radiusY];
+  const radii = r => view.portrait ? [r.radiusY, r.radiusY * 1.5 * view.h / LONG] : [r.radiusY * ratio, r.radiusY];
   const svg = document.getElementById('rings');
   const ellipses = data.rings.map(r => {
     const e = document.createElementNS(SVG_NS, 'ellipse');
@@ -145,8 +145,8 @@ async function main() {
   const nodes = [];
   data.rings.forEach((ring, ringIdx) => {
     const items = data.items.filter(i => i.ring === ringIdx + 1);
-    const cover = ring.shape === 'cover';
     items.forEach((item, idx) => {
+      const cover = (item.shape || ring.shape) === 'cover';
       const w = cover ? ring.size * .72 : ring.size, h = ring.size;
       const node = el('div', 'node' + (cover ? ' cover' : ''));
       node.style.setProperty('--i', nodes.length);
@@ -164,7 +164,7 @@ async function main() {
       const setGlow = () => a.style.setProperty('--glow', item.glow || glowFrom(img));
       img.complete ? setGlow() : img.addEventListener('load', setGlow);
 
-      nodes.push({ node, shift, a, ring, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0 });
+      nodes.push({ node, shift, a, label, ring, h, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0, px: 0, py: 0 });
     });
   });
 
@@ -178,8 +178,29 @@ async function main() {
         const need = active.radius * ZOOM + n.radius + PUSH_MARGIN + 18; // 18 = label height
         if (dist < need) { px = (dx / dist) * (need - dist); py = (dy / dist) * (need - dist); }
       }
+      n.px = px; n.py = py;
       n.shift.style.setProperty('--px', px + 'px');
       n.shift.style.setProperty('--py', py + 'px');
+    });
+  }
+
+  // Names that would cover another name or photo fade out. Inner rings win and the active item always shows;
+  // a hidden name needs a few px of clearance before it returns, so it does not flicker at the edge.
+  const box = (x, y, rx, ry = rx) => [x - rx, y - ry, x + rx, y + ry];
+  const hits = (a, b, pad) => a[0] < b[2] + pad && b[0] < a[2] + pad && a[1] < b[3] + pad && b[1] < a[3] + pad;
+  function declutter() {
+    if (view.portrait) return; // portrait already shows only the active name
+    const photos = nodes.map(n => box(n.x + n.px, n.y + n.py, n.radius));
+    const taken = [...photos, box(view.cx, view.cy, 75), box(view.cx, view.cy + 92, 45, 14)];
+    [active, ...nodes.filter(n => n !== active)].forEach(n => {
+      if (!n) return;
+      n.labelW ||= n.label.offsetWidth; n.labelH ||= n.label.offsetHeight;
+      const x = n.x + n.px, top = n.y + n.py + n.h / 2 + 6;
+      const own = photos[nodes.indexOf(n)];
+      const rect = [x - n.labelW / 2, top, x + n.labelW / 2, top + n.labelH];
+      const off = n !== active && taken.some(t => t !== own && hits(rect, t, n.labelOff ? 6 : 0));
+      if (off !== n.labelOff) { n.labelOff = off; n.node.classList.toggle('label-off', off); }
+      if (!off) taken.push(rect);
     });
   }
 
@@ -220,6 +241,7 @@ async function main() {
       n.y = view.cy + Math.sin(rad) * ry;
       n.node.style.transform = `translate3d(${n.x}px, ${n.y}px, 0)`;
     });
+    declutter();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
