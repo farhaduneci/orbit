@@ -1,5 +1,4 @@
-const STAGE = { w: 1600, h: 900 };
-const CX = STAGE.w / 2, CY = STAGE.h / 2;
+const LONG = 1600, SHORT = 900;
 const ZOOM = 1.8;
 const PUSH_MARGIN = 14;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -7,8 +6,22 @@ const DATA_DIRS = ['data/', 'template/'];
 
 const stage = document.getElementById('stage');
 
+// Landscape screens get a 1600x900 stage; portrait screens (phones) get the same stage turned upright,
+// so orbits stretch vertically instead of shrinking into a thin band. Tall phones also get a taller stage
+// so the header and pills sit near the screen edges.
+const view = { portrait: false, w: 0, h: 0, cx: 0, cy: 0 };
+const onLayout = [];
 function fit() {
-  const s = Math.min(innerWidth / STAGE.w, innerHeight / STAGE.h);
+  const portrait = innerHeight > innerWidth;
+  const w = portrait ? SHORT : LONG;
+  const h = portrait ? Math.round(Math.min(Math.max(LONG, SHORT * innerHeight / innerWidth), 2000)) : SHORT;
+  if (w !== view.w || h !== view.h) {
+    Object.assign(view, { portrait, w, h, cx: w / 2, cy: h / 2 });
+    document.body.classList.toggle('portrait', portrait);
+    stage.style.width = w + 'px'; stage.style.height = h + 'px';
+    onLayout.forEach(f => f());
+  }
+  const s = Math.min(innerWidth / view.w, innerHeight / view.h);
   stage.style.transform = `translate(-50%, -50%) scale(${s})`;
 }
 addEventListener('resize', fit);
@@ -99,12 +112,13 @@ async function main() {
   }
 
   const ratio = data.ellipseRatio;
+  // Orbit radii along x and y; the long axis follows the stage's long side and stretches with a taller portrait stage.
+  const radii = r => view.portrait ? [r.radiusY, r.radiusY * ratio * view.h / LONG * 1.15] : [r.radiusY * ratio, r.radiusY];
   const svg = document.getElementById('rings');
-  data.rings.forEach(r => {
+  const ellipses = data.rings.map(r => {
     const e = document.createElementNS(SVG_NS, 'ellipse');
-    e.setAttribute('cx', CX); e.setAttribute('cy', CY);
-    e.setAttribute('rx', r.radiusY * ratio); e.setAttribute('ry', r.radiusY);
     svg.appendChild(e);
+    return [e, r];
   });
 
   // Center: the owner.
@@ -112,8 +126,21 @@ async function main() {
   const me = el('div', 'me');
   const [meFrame, meLabel] = buildFrame(meImg, '', data.name);
   me.append(meFrame, meLabel);
-  me.style.cssText = `--w:150px;--h:150px;left:${CX}px;top:${CY}px`;
+  me.style.cssText = '--w:150px;--h:150px';
   stage.appendChild(me);
+
+  const layout = () => {
+    svg.setAttribute('width', view.w); svg.setAttribute('height', view.h);
+    svg.setAttribute('viewBox', `0 0 ${view.w} ${view.h}`);
+    ellipses.forEach(([e, r]) => {
+      const [rx, ry] = radii(r);
+      e.setAttribute('cx', view.cx); e.setAttribute('cy', view.cy);
+      e.setAttribute('rx', rx); e.setAttribute('ry', ry);
+    });
+    me.style.left = view.cx + 'px'; me.style.top = view.cy + 'px';
+  };
+  onLayout.push(layout);
+  layout();
 
   const nodes = [];
   data.rings.forEach((ring, ringIdx) => {
@@ -157,12 +184,28 @@ async function main() {
   }
 
   let active = null;
+  const activate = n => {
+    if (active === n) return;
+    active?.node.classList.remove('is-active');
+    active = n;
+    n?.node.classList.add('is-active');
+    spread(n);
+  };
+
+  // Mouse: hover previews, click opens. Touch has no hover, so the first tap previews and a second tap opens.
+  let tapped = null;
   nodes.forEach(n => {
-    const on = () => { active = n; n.node.classList.add('is-active'); spread(n); };
-    const off = () => { active = null; n.node.classList.remove('is-active'); spread(null); };
-    n.a.addEventListener('pointerenter', on); n.a.addEventListener('pointerleave', off);
-    n.a.addEventListener('focus', on); n.a.addEventListener('blur', off);
+    n.a.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') activate(n); });
+    n.a.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && active === n) activate(null); });
+    n.a.addEventListener('pointerdown', e => { tapped = e.pointerType === 'mouse' ? null : { n, armed: active === n }; });
+    n.a.addEventListener('click', e => {
+      if (tapped?.n === n && !tapped.armed) { e.preventDefault(); activate(n); }
+      tapped = null;
+    });
+    n.a.addEventListener('focus', () => activate(n));
+    n.a.addEventListener('blur', () => { if (active === n) activate(null); });
   });
+  document.addEventListener('pointerdown', e => { if (!e.target.closest('.node')) activate(null); });
 
   const spin = data.rotation?.enabled && !matchMedia('(prefers-reduced-motion: reduce)').matches;
   let last = performance.now();
@@ -172,8 +215,9 @@ async function main() {
     nodes.forEach(n => {
       if (spin && !active) n.angle += n.ring.degPerSecond * dt;
       const rad = n.angle * Math.PI / 180;
-      n.x = CX + Math.cos(rad) * n.ring.radiusY * ratio;
-      n.y = CY + Math.sin(rad) * n.ring.radiusY;
+      const [rx, ry] = radii(n.ring);
+      n.x = view.cx + Math.cos(rad) * rx;
+      n.y = view.cy + Math.sin(rad) * ry;
       n.node.style.transform = `translate3d(${n.x}px, ${n.y}px, 0)`;
     });
     requestAnimationFrame(frame);

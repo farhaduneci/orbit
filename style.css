@@ -51,18 +51,12 @@ h1 { font-size: 32px; font-weight: 600; letter-spacing: -.9px; line-height: 1.1;
 .frame { border-radius: inherit; }
 .glow { position: absolute; inset: 0; border-radius: inherit; background: var(--glow, rgba(0, 0, 0, .25)); filter: blur(30px); transform: scale(1.5); opacity: 0; transition: opacity 280ms ease; pointer-events: none; }
 
-@media (hover: hover) and (pointer: fine) {
-  .node a:hover .frame { transform: scale(var(--zoom)); }
-  .node a:hover .photo { filter: none; }
-  .node a:hover .glow { opacity: .9; }
-  .node a:hover .label { transform: translate(-50%, calc(var(--h) * (var(--zoom) - 1) / 2)); background: var(--surface); border-color: var(--hairline); color: var(--ink); }
-  .node a:hover .label small { max-height: 20px; opacity: 1; }
-}
-.node a:focus-visible .frame { transform: scale(var(--zoom)); }
-.node a:focus-visible .photo { filter: none; }
-.node a:focus-visible .glow { opacity: .9; }
-.node a:focus-visible .label { transform: translate(-50%, calc(var(--h) * (var(--zoom) - 1) / 2)); background: var(--surface); border-color: var(--hairline); color: var(--ink); }
-.node a:focus-visible .label small { max-height: 20px; opacity: 1; }
+/* .is-active is set by orbit.js on mouse hover, keyboard focus, or a first tap on touch screens. */
+.is-active .frame { transform: scale(var(--zoom)); }
+.is-active .photo { filter: none; }
+.is-active .glow { opacity: .9; }
+.is-active .label { transform: translate(-50%, calc(var(--h) * (var(--zoom) - 1) / 2)); background: var(--surface); border-color: var(--hairline); color: var(--ink); }
+.is-active .label small { max-height: 20px; opacity: 1; }
 
 .label {
   position: absolute; left: 50%; top: calc(100% + 6px); transform: translateX(-50%); width: max-content; max-width: 160px; text-align: center;
@@ -75,9 +69,25 @@ h1 { font-size: 32px; font-weight: 600; letter-spacing: -.9px; line-height: 1.1;
 .me .photo { filter: none; border: 2px solid #ffb110; }
 .me .label { transform: translateX(-50%); color: var(--ink); font-weight: 600; font-size: 14px; }
 
+/* Portrait (phones): the stage is scaled down ~2.4x, so text sizes go up in stage units to stay readable,
+   and only the active item shows its name. */
+.portrait header { left: 48px; right: 48px; top: 56px; max-width: none; text-align: center; }
+.portrait h1 { font-size: 64px; letter-spacing: -1.8px; }
+.portrait #subtitle { font-size: 30px; margin-top: 14px; }
+.portrait .pill { bottom: 56px; font-size: 24px; gap: 12px; padding: 16px 24px; }
+.portrait .pill svg { width: 24px; height: 24px; }
+.portrait #chip { left: 48px; }
+.portrait #repo { right: 48px; top: auto; bottom: 56px; }
+.portrait #sources { right: auto; left: 50%; bottom: 136px; transform: translateX(-50%); }
+.portrait .node .label { opacity: 0; font-size: 26px; max-width: 360px; transition: transform 240ms var(--ease-out), opacity 200ms ease; }
+.portrait .node .label small { font-size: 22px; }
+.portrait .is-active .label { opacity: 1; }
+.portrait .is-active .label small { max-height: 40px; }
+.portrait .me .label { font-size: 30px; }
+
 @keyframes appear { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .node { animation: none; }
   .frame, .shift, .label { transition: none; }
-  .node a:hover .frame, .node a:focus-visible .frame { transform: none; }
+  .is-active .frame { transform: none; }
 }
