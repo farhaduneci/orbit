@@ -85,6 +85,19 @@ function buildFrame(img, tagline, name) {
   return [frame, label];
 }
 
+// Link list for items with several homes, labeled by site (youtube.com, x.com).
+function buildMenu(links, a) {
+  a.setAttribute('aria-haspopup', 'true');
+  a.setAttribute('aria-expanded', 'false');
+  const menu = el('div', 'links');
+  links.forEach(href => {
+    const link = el('a', '', { href, target: '_blank', rel: 'noopener' });
+    link.textContent = new URL(href).hostname.replace(/^www\./, '');
+    menu.appendChild(link);
+  });
+  return menu;
+}
+
 async function main() {
   const { dir, data } = await loadData();
   const title = data.title.replace('{name}', data.name);
@@ -151,20 +164,22 @@ async function main() {
       const node = el('div', 'node' + (cover ? ' cover' : ''));
       node.style.setProperty('--i', nodes.length);
       const shift = el('div', 'shift');
-      const a = el('a', '', { href: item.links[0] || '#', 'aria-label': item.name });
-      a.style.cssText = `--w:${w}px;--h:${h}px`;
+      shift.style.cssText = `--w:${w}px;--h:${h}px`;
+      const a = el('a', 'item', { href: item.links[0] || '#', 'aria-label': item.name });
       if (item.links[0]) { a.target = '_blank'; a.rel = 'noopener'; } else { a.addEventListener('click', e => e.preventDefault()); }
       const img = el('img', 'photo', { src: dir + item.photo, alt: '' });
       const [frame, label] = buildFrame(img, item.tagline, item.name);
       a.append(frame, label);
       shift.appendChild(a);
+      const menu = item.links.length > 1 ? buildMenu(item.links, a) : null;
+      if (menu) shift.appendChild(menu);
       node.appendChild(shift);
       stage.appendChild(node);
 
       const setGlow = () => a.style.setProperty('--glow', item.glow || glowFrom(img));
       img.complete ? setGlow() : img.addEventListener('load', setGlow);
 
-      nodes.push({ node, shift, a, label, ring, h, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0, px: 0, py: 0 });
+      nodes.push({ node, shift, a, menu, label, ring, h, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0, px: 0, py: 0 });
     });
   });
 
@@ -204,29 +219,44 @@ async function main() {
     });
   }
 
-  let active = null;
+  let active = null, open = null;
   const activate = n => {
     if (active === n) return;
+    if (open && open !== n) toggleMenu(open, false);
     active?.node.classList.remove('is-active');
     active = n;
     n?.node.classList.add('is-active');
     spread(n);
   };
+  // Multi-link items open a small menu beside the zoomed photo, on the side facing the stage center.
+  const toggleMenu = (n, show) => {
+    n.node.classList.toggle('menu-open', show);
+    n.node.classList.toggle('menu-left', show && n.x + n.px > view.cx);
+    n.a.setAttribute('aria-expanded', show);
+    open = show ? n : null;
+  };
 
   // Mouse: hover previews, click opens. Touch has no hover, so the first tap previews and a second tap opens.
+  // .shift holds the photo and its menu, so moving from one to the other keeps the item active.
   let tapped = null;
   nodes.forEach(n => {
-    n.a.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') activate(n); });
-    n.a.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && active === n) activate(null); });
+    n.shift.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') activate(n); });
+    n.shift.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && active === n && open !== n) activate(null); });
     n.a.addEventListener('pointerdown', e => { tapped = e.pointerType === 'mouse' ? null : { n, armed: active === n }; });
     n.a.addEventListener('click', e => {
-      if (tapped?.n === n && !tapped.armed) { e.preventDefault(); activate(n); }
+      const preview = tapped?.n === n && !tapped.armed;
       tapped = null;
+      if (preview || n.menu) e.preventDefault();
+      if (preview) return activate(n);
+      if (n.menu) { activate(n); toggleMenu(n, open !== n); if (open === n && e.detail === 0) n.menu.querySelector('a').focus(); }
     });
-    n.a.addEventListener('focus', () => activate(n));
-    n.a.addEventListener('blur', () => { if (active === n) activate(null); });
+    n.shift.addEventListener('focusin', () => activate(n));
+    n.shift.addEventListener('focusout', e => { if (!n.shift.contains(e.relatedTarget) && active === n) activate(null); });
   });
   document.addEventListener('pointerdown', e => { if (!e.target.closest('.node')) activate(null); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && open) { const n = open; toggleMenu(n, false); n.a.focus(); }
+  });
 
   const spin = data.rotation?.enabled && !matchMedia('(prefers-reduced-motion: reduce)').matches;
   let last = performance.now();

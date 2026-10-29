@@ -46,7 +46,8 @@
       "photo": "photos/person-1.svg",
       "tagline": "Why this person matters",
       "links": [
-        "https://example.com"
+        "https://example.com",
+        "https://www.youtube.com/"
       ],
       "glow": null
     },
