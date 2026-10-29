@@ -55,8 +55,10 @@ Temporary Items
 ### Project ###
 # Personal data: photos, people.json, sources. Copy template/ to data/ to start.
 data/
-.claude/
+.claude/*
+!.claude/skills/
 docs/*.tmp
 dist/
 .wrangler/
 node_modules/
+out/
