@@ -3,13 +3,23 @@ const ZOOM = 1.8;
 const PUSH_MARGIN = 14;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DATA_DIRS = ['data/', 'template/'];
+// Hover is sticky on purpose, so the enter/leave flicker at an item's edge cannot happen (deactivating used to
+// resume the spin, the item drifted back under the cursor, and the cycle repeated):
+// - hit areas are a few px wider than the photo, and an active item keeps its zoomed area plus the same slack;
+// - the mouse must stay off an item LEAVE_DELAY ms before it deactivates;
+// - the spin stays paused PAUSE_AFTER ms after a hover ends, then eases back in.
+const HOVER_PAD = 10;
+const LEAVE_DELAY = 200;
+const PAUSE_AFTER = 1000;
+const SPIN_IN = 600, SPIN_OUT = 120; // ease time constants in ms
+const DECLUTTER_EVERY = 100;
 
 const stage = document.getElementById('stage');
 
 // Landscape screens get a 1600x900 stage; portrait screens (phones) get the same stage turned upright,
 // so orbits stretch vertically instead of shrinking into a thin band. Tall phones also get a taller stage
 // so the header and pills sit near the screen edges.
-const view = { portrait: false, w: 0, h: 0, cx: 0, cy: 0 };
+const view = { portrait: false, w: 0, h: 0, cx: 0, cy: 0, s: 1 };
 const onLayout = [];
 function fit() {
   const portrait = innerHeight > innerWidth;
@@ -22,16 +32,21 @@ function fit() {
     onLayout.forEach(f => f());
   }
   const s = Math.min(innerWidth / view.w, innerHeight / view.h);
+  view.s = s;
   stage.style.transform = `translate(-50%, -50%) scale(${s})`;
 }
 addEventListener('resize', fit);
 fit();
 
 // Average photo color, pushed toward a saturated tone so dark portraits still glow.
+let glowCtx;
 function glowFrom(img) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 16;
-  const ctx = c.getContext('2d');
+  if (!glowCtx) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    glowCtx = c.getContext('2d', { willReadFrequently: true });
+  }
+  const ctx = glowCtx;
   ctx.drawImage(img, 0, 0, 16, 16);
   const d = ctx.getImageData(0, 0, 16, 16).data;
   let r = 0, g = 0, b = 0, n = 0;
@@ -128,6 +143,7 @@ async function main() {
   // Orbit radii along x and y; the long axis follows the stage's long side and stretches with a taller portrait stage.
   const radii = r => view.portrait ? [r.radiusY, r.radiusY * 1.5 * view.h / LONG] : [r.radiusY * ratio, r.radiusY];
   const svg = document.getElementById('rings');
+  let dirty = true; // positions need a redraw even when the spin is paused
   const ellipses = data.rings.map(r => {
     const e = document.createElementNS(SVG_NS, 'ellipse');
     svg.appendChild(e);
@@ -142,11 +158,14 @@ async function main() {
   me.style.cssText = '--w:150px;--h:150px';
   stage.appendChild(me);
 
+  let ringR = [];
   const layout = () => {
+    ringR = data.rings.map(radii);
+    dirty = true;
     svg.setAttribute('width', view.w); svg.setAttribute('height', view.h);
     svg.setAttribute('viewBox', `0 0 ${view.w} ${view.h}`);
-    ellipses.forEach(([e, r]) => {
-      const [rx, ry] = radii(r);
+    ellipses.forEach(([e], i) => {
+      const [rx, ry] = ringR[i];
       e.setAttribute('cx', view.cx); e.setAttribute('cy', view.cy);
       e.setAttribute('rx', rx); e.setAttribute('ry', ry);
     });
@@ -179,7 +198,7 @@ async function main() {
       const setGlow = () => a.style.setProperty('--glow', item.glow || glowFrom(img));
       img.complete ? setGlow() : img.addEventListener('load', setGlow);
 
-      nodes.push({ node, shift, a, menu, label, ring, h, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0, px: 0, py: 0 });
+      nodes.push({ node, shift, a, menu, label, ring, ringIdx, h, radius: Math.max(w, h) / 2, angle: ring.phase + (360 / items.length) * idx, x: 0, y: 0, px: 0, py: 0 });
     });
   });
 
@@ -219,14 +238,18 @@ async function main() {
     });
   }
 
-  let active = null, open = null;
+  let active = null, open = null, leaveTimer = 0, resumeAt = 0;
   const activate = n => {
+    clearTimeout(leaveTimer);
+    leaveTimer = 0;
     if (active === n) return;
     if (open && open !== n) toggleMenu(open, false);
     active?.node.classList.remove('is-active');
     active = n;
+    if (!n) resumeAt = performance.now() + PAUSE_AFTER;
     n?.node.classList.add('is-active');
     spread(n);
+    declutter();
   };
   // Multi-link items open a small menu beside the zoomed photo, on the side facing the stage center.
   const toggleMenu = (n, show) => {
@@ -237,11 +260,31 @@ async function main() {
   };
 
   // Mouse: hover previews, click opens. Touch has no hover, so the first tap previews and a second tap opens.
-  // .shift holds the photo and its menu, so moving from one to the other keeps the item active.
+  // Hover is hit-tested here, not by the DOM: each photo gets HOVER_PAD of slack, the active one keeps its zoomed
+  // size plus slack, and when areas overlap only the nearest item wins. The menu sits in .shift, so moving from
+  // an item onto its menu keeps it active. Only real pointer movement counts: an item sliding under a still
+  // cursor (spin, neighbours settling) does not.
+  const byShift = new Map(nodes.map(n => [n.shift, n]));
+  const hitTest = e => {
+    const x = (e.clientX - innerWidth / 2) / view.s + view.cx, y = (e.clientY - innerHeight / 2) / view.s + view.cy;
+    const score = n => Math.hypot(x - n.x - n.px, y - n.y - n.py) - (n === active ? n.radius * ZOOM : n.radius) - HOVER_PAD;
+    if (active && score(active) <= 0) return active;
+    let best = null, bestScore = 0;
+    for (const n of nodes) { const sc = score(n); if (sc <= bestScore) { best = n; bestScore = sc; } }
+    return best;
+  };
+  let px = NaN, py = NaN;
+  document.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse' || (e.clientX === px && e.clientY === py)) return;
+    px = e.clientX; py = e.clientY;
+    const over = byShift.get(e.target.closest?.('.shift'));
+    const n = over && over === active && over.menu?.contains(e.target) ? over : hitTest(e);
+    if (n) return activate(n);
+    if (active && open !== active && !leaveTimer) leaveTimer = setTimeout(() => { leaveTimer = 0; if (open !== active) activate(null); }, LEAVE_DELAY);
+  }, { passive: true });
+  document.documentElement.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && open !== active) activate(null); });
   let tapped = null;
   nodes.forEach(n => {
-    n.shift.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') activate(n); });
-    n.shift.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && active === n && open !== n) activate(null); });
     n.a.addEventListener('pointerdown', e => { tapped = e.pointerType === 'mouse' ? null : { n, armed: active === n }; });
     n.a.addEventListener('click', e => {
       const preview = tapped?.n === n && !tapped.armed;
@@ -259,20 +302,31 @@ async function main() {
   });
 
   const spin = data.rotation?.enabled && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let last = performance.now();
+  let last = performance.now(), speed = spin ? 1 : 0, lastDeclutter = 0, declutterDue = false;
+  // Draws only while something moves; a paused, settled page costs nothing per frame.
   function frame(now) {
+    requestAnimationFrame(frame);
     const dt = Math.min((now - last) / 1000, .1);
     last = now;
+    const target = spin && !active && now >= resumeAt ? 1 : 0;
+    if (speed !== target) {
+      speed += (target - speed) * (1 - Math.exp(-dt * 1000 / (target ? SPIN_IN : SPIN_OUT)));
+      if (Math.abs(target - speed) < .001) speed = target;
+    }
+    if (speed === 0 && !dirty) {
+      if (declutterDue) { declutterDue = false; declutter(); }
+      return;
+    }
+    dirty = false;
     nodes.forEach(n => {
-      if (spin && !active) n.angle += n.ring.degPerSecond * dt;
+      if (speed) n.angle += n.ring.degPerSecond * dt * speed;
       const rad = n.angle * Math.PI / 180;
-      const [rx, ry] = radii(n.ring);
+      const [rx, ry] = ringR[n.ringIdx];
       n.x = view.cx + Math.cos(rad) * rx;
       n.y = view.cy + Math.sin(rad) * ry;
       n.node.style.transform = `translate3d(${n.x}px, ${n.y}px, 0)`;
     });
-    declutter();
-    requestAnimationFrame(frame);
+    if (now - lastDeclutter >= DECLUTTER_EVERY) { lastDeclutter = now; declutterDue = false; declutter(); } else declutterDue = true;
   }
   requestAnimationFrame(frame);
 }
